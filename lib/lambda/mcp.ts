@@ -136,7 +136,23 @@ export const handler: Handler = async (
       };
     }
 
-    // Only allow POST requests
+    // Handle GET requests for OAuth discovery
+    if (event.httpMethod === "GET") {
+      return {
+        statusCode: 401,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "WWW-Authenticate": 'Bearer realm="MCP Server", error="invalid_request", error_description="Authentication required"',
+        },
+        body: JSON.stringify({
+          error: "invalid_request",
+          error_description: "Authentication required"
+        }),
+      };
+    }
+
+    // Only allow POST requests for JSON-RPC
     if (event.httpMethod !== "POST") {
       return {
         statusCode: 405,

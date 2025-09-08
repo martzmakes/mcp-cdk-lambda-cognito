@@ -1,21 +1,32 @@
-# AWS Lambda MCP Server with OAuth 2
+# MCP Server on AWS Lambda with OAuth 2
 
-A standalone CDK construct that deploys Model Context Protocol (MCP) servers on AWS Lambda with OAuth 2 authorization via Amazon Cognito. This project provides a complete, production-ready infrastructure for running custom MCP servers with secure authentication.
+A **template and example** showing how to deploy Model Context Protocol (MCP) servers on AWS Lambda with OAuth 2 authorization via Amazon Cognito. This project demonstrates a complete, production-ready infrastructure for running custom MCP servers with secure authentication.
+
+The included **Dog Facts server** serves as a practical example of implementing MCP tools, but this template can be easily customized for any MCP server use case.
 
 ## About This Project
 
-This repository was created as a standalone, reusable CDK construct based on work from [AWS Labs' run-model-context-protocol-servers-with-aws-lambda](https://github.com/awslabs/run-model-context-protocol-servers-with-aws-lambda) project. It focuses specifically on creating a simple, self-contained solution for deploying MCP servers with OAuth 2 authentication without third-party dependencies.
+This repository was created as a standalone template based on work from [AWS Labs' run-model-context-protocol-servers-with-aws-lambda](https://github.com/awslabs/run-model-context-protocol-servers-with-aws-lambda) project. It provides a **simplified, educational example** showing how to:
+
+- Implement MCP servers directly in Lambda functions
+- Set up OAuth 2 authentication with Cognito
+- Deploy everything with CDK
+- Integrate with Claude Code
 
 **Blog Post**: Read more about this project at [martzmakes.com](https://martzmakes.com)
 
-## Features
+## What You'll Learn
 
-- **Complete OAuth 2 Infrastructure**: Automatically sets up Amazon Cognito User Pool with OAuth 2 flows and self-registration
-- **API Gateway Integration**: Creates a REST API with Cognito authorization and proper WWW-Authenticate headers
+This template demonstrates:
+
+- **Direct MCP Implementation**: How to implement MCP servers directly in Lambda functions without external processes
+- **Complete OAuth 2 Infrastructure**: Automatic setup of Amazon Cognito User Pool with OAuth 2 flows and self-registration
+- **API Gateway Integration**: REST API with Cognito authorization and proper WWW-Authenticate headers
 - **High-Performance Lambda**: ARM64 architecture with 29-second timeout for optimal cost and performance
-- **Custom MCP Server**: Uses official `@modelcontextprotocol/sdk` without third-party dependencies
-- **RFC 9728 Compliance**: Implements OAuth 2 Protected Resource Metadata for MCP discovery
+- **RFC 9728 Compliance**: OAuth 2 Protected Resource Metadata for MCP discovery
 - **Security Best Practices**: URI-style resource server identifiers, proper scoping, and production-ready security
+- **CDK Infrastructure as Code**: Complete infrastructure deployment with AWS CDK
+- **Claude Code Integration**: Step-by-step setup for connecting to Claude Code
 
 ## Quick Start
 
@@ -31,38 +42,47 @@ This repository was created as a standalone, reusable CDK construct based on wor
 
 3. **Build and deploy**:
    ```bash
-   npm run deploy
+   npm run build
+   npx cdk deploy
    ```
 
 4. **Get your server URL**:
    After deployment, look for the `McpServerUrl` output value.
 
-## Using the Construct
+## Example: Dog Facts MCP Server
 
-### Basic Usage
+This template includes a **Dog Facts MCP server** as a working example that provides one tool:
 
-```typescript
-import { StandaloneMcpServer } from './lib/standalone-mcp-server.js';
+### Available Tool
+- **getDogFacts**: Get random facts about dogs
+  - **Parameters**: 
+    - `limit` (optional): Number of facts to return (1-10, default: 5)
+  - **Returns**: Formatted list of dog facts from the Dog API
 
-const mcpStack = new StandaloneMcpServer(app, "MyMcpServer", {
-  env: { account: process.env["CDK_DEFAULT_ACCOUNT"], region: "us-east-1" },
-  stackName: "MyMcp-Server",
-  serverName: "my-server",
-  serverCommand: "node",
-  serverArgs: [
-    "/var/task/function/my-custom-server.js"
-  ],
-  nodeModules: ["@modelcontextprotocol/sdk"],
-});
-```
+### Implementation Structure
+The example server is directly implemented in `lib/lambda/mcp.ts` and demonstrates:
+- Standard MCP protocol methods (`initialize`, `tools/list`, `tools/call`)
+- External API integration (Dog API)
+- Parameter validation and error handling
+- Proper JSON-RPC response formatting
 
-### Configuration Options
+## Customizing for Your Use Case
 
-- **serverName**: Unique name for your MCP server (used in OAuth scopes and resource names)
-- **serverCommand**: Command to run your MCP server (e.g., "node", "python")
-- **serverArgs**: Arguments passed to the server command (typically path to your custom MCP server)
-- **nodeModules**: Optional array of Node.js modules to bundle with the Lambda function
-- **additionalFiles**: Optional array of files to copy to the Lambda function
+To create your own MCP server:
+
+1. **Modify the Lambda function** (`lib/lambda/mcp.ts`):
+   - Update the `tools/list` response with your tools
+   - Implement your tool logic in the `tools/call` handler
+   - Update server metadata in the `initialize` response
+
+2. **Update the CDK stack** (`lib/mcp-cdk-lambda-cognito-stack.ts`):
+   - Change the hardcoded `serverName` from "dog-facts" to your service name
+   - Update OAuth scopes and resource identifiers
+
+3. **Customize infrastructure** as needed:
+   - Adjust Lambda memory, timeout, or runtime
+   - Modify Cognito user pool settings
+   - Add additional AWS resources
 
 ### Authentication
 
@@ -86,64 +106,28 @@ After deployment, you'll get several outputs:
 
 ### Client Integration
 
-Use the MCP client SDK with OAuth support:
+The deployed dog facts server uses the scope: `mcp-dog-facts/dog-facts`
 
-```typescript
-import { StdioServerAdapter } from '@aws/run-mcp-servers-with-aws-lambda';
+You can integrate with the server using MCP client libraries that support OAuth 2 authentication.
 
-const client = new McpClient({
-  url: 'https://your-api-id.execute-api.us-east-1.amazonaws.com/prod/mcp',
-  oauth: {
-    authUrl: 'https://your-cognito-domain.auth.us-east-1.amazoncognito.com',
-    tokenUrl: 'https://your-cognito-domain.auth.us-east-1.amazoncognito.com/oauth2/token',
-    clientId: 'your-client-id',
-    scopes: ['https://api.mcp.your-server-name.example.com/your-server-name']
-  }
-});
-```
+## Try the Example
 
-## Examples
-
-### Dog Facts Server
-
-The included example deploys a custom dog facts MCP server:
+Deploy the included dog facts MCP server to see the template in action:
 
 ```bash
+npm install
 npm run build
-cdk deploy DogFactsMcpServer
+npx cdk deploy
 ```
 
-This creates an MCP server that provides dog facts via the Dog API using a custom server implementation (`function/dog-facts-server.ts`).
+This creates a complete MCP server infrastructure demonstrating:
+- Dog facts functionality via the Dog API (the example implementation)
+- OAuth 2 authentication via Cognito
+- API Gateway with proper authorization
+- Lambda function running on ARM64
+- Full integration with Claude Code
 
-### Custom Server
-
-To deploy your own MCP server:
-
-1. Create your custom MCP server in the `function/` directory using the `@modelcontextprotocol/sdk`
-2. Update `lib/app.ts` with your server configuration pointing to your custom server file
-3. Deploy with `npm run deploy`
-
-#### Example Custom Server Structure
-
-```typescript
-// function/my-custom-server.ts
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-
-const server = new Server({
-  name: "my-custom-server",
-  version: "1.0.0"
-});
-
-// Define your tools
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  // Implement your custom logic
-});
-
-// Start server
-const transport = new StdioServerTransport();
-await server.connect(transport);
-```
+Once you understand how it works, customize it for your own MCP server needs!
 
 ## Security
 
@@ -153,7 +137,9 @@ await server.connect(transport);
 - API Gateway with proper authorization scopes
 - Secrets Manager for credential storage
 
-## Deploying and Using with Claude Code
+## Step-by-Step: Deploy and Connect to Claude Code
+
+This template provides a complete walkthrough for deploying your MCP server and connecting it to Claude Code.
 
 ### Step 1: Deploy the MCP Server
 
@@ -167,25 +153,26 @@ await server.connect(transport);
 2. **Install dependencies and deploy**:
    ```bash
    npm install
-   npm run deploy
+   npm run build
+   npx cdk deploy
    ```
 
 3. **Note the deployment outputs** - you'll need these values:
    - `McpServerUrl`: Your MCP server endpoint
-   - `InteractiveOAuthClientId`: Client ID for interactive OAuth
-   - `UserPoolId`: Cognito User Pool ID  
-   - `IssuerDomain`: OAuth issuer URL
-   - `HostedUIUrl`: URL for user registration and login
+   - `McpOAuthAuthorizationUrl`: OAuth authorization URL
+   - `McpOAuthTokenUrl`: OAuth token URL
+   - `McpOAuthClientId`: OAuth client ID
+   - `McpOAuthScope`: OAuth scope
+   - `SignInUrl`: User registration and sign-in URL
 
 ### Step 2: Register a User Account
 
 Users can now self-register using Cognito's hosted UI:
 
-1. **Open the registration page**: Use the `HostedUIUrl` from the deployment outputs
+1. **Open the registration page**: Use the `SignInUrl` from the deployment outputs
 2. **Create an account**: Click "Sign up" and provide:
-   - Email address (will be verified)
+   - Email address (this will be your username)
    - Password (must meet complexity requirements)
-   - Username (optional)
 3. **Verify email**: Check your email for a verification code and complete the verification process
 4. **Login**: Once verified, you can log in with your credentials
 
@@ -197,34 +184,39 @@ Add the MCP server to your Claude Code configuration file (`~/.config/claude-cod
 {
   "mcpServers": {
     "dog-facts": {
-      "url": "https://your-api-id.execute-api.us-east-1.amazonaws.com/prod/mcp",
+      "url": "[McpServerUrl from deployment outputs]",
       "oauth": {
         "method": "resource_owner_password_credentials",
-        "authorization_url": "https://mcp-lambda-dog-facts-ACCOUNT.auth.us-east-1.amazoncognito.com/oauth2/authorize",
-        "token_url": "https://mcp-lambda-dog-facts-ACCOUNT.auth.us-east-1.amazoncognito.com/oauth2/token",
-        "client_id": "your-interactive-client-id",
-        "username": "your-registered-username-or-email",
+        "authorization_url": "[McpOAuthAuthorizationUrl from deployment outputs]",
+        "token_url": "[McpOAuthTokenUrl from deployment outputs]",
+        "client_id": "[McpOAuthClientId from deployment outputs]",
+        "username": "your-registered-email@example.com",
         "password": "your-registered-password",
-        "scope": "https://api.mcp.dog-facts.example.com/dog-facts"
+        "scope": "[McpOAuthScope from deployment outputs]"
       }
     }
   }
 }
 ```
 
-**Note**: Replace the placeholder values with:
-- `your-api-id`: From the `McpServerUrl` output
-- `ACCOUNT`: Your AWS account ID (visible in the domain prefix)
-- `your-interactive-client-id`: From the `InteractiveOAuthClientId` output  
-- `your-registered-username-or-email`: The username or email you registered with
+**Note**: Replace the bracketed values with the corresponding outputs from your CDK deployment, and update:
+- `your-registered-email@example.com`: The email address you registered with
 - `your-registered-password`: The password you created during registration
 
 ### Step 4: Test the Connection
 
 In Claude Code, you should now be able to use the MCP server. Test it by asking Claude to:
 
-1. List available tools: "What tools are available from the dog-facts server?"
-2. Use a tool: "Get me some dog facts"
+1. **List available tools**: "What tools are available from the dog-facts server?"
+2. **Use the tool**: "Get me some dog facts" or "Get me 3 dog facts"
+3. **Test with parameters**: "Get me 8 dog facts" (tests the limit parameter)
+
+### Common Issues and Solutions
+
+- **Authentication Failed**: Ensure your username/email and password are correct and the account is verified
+- **Scope Error**: Make sure the scope in your configuration exactly matches: `mcp-dog-facts/dog-facts`
+- **URL Issues**: Replace all placeholder values (your-api-id, ACCOUNT) with actual values from the deployment outputs
+- **Token Expired**: OAuth tokens have limited lifetimes; Claude Code should automatically refresh them
 
 ### Authentication Flow Details
 
@@ -249,7 +241,7 @@ You can test OAuth authentication manually using curl:
 # Get access token using resource owner password credentials  
 curl -X POST "https://your-cognito-domain.auth.us-east-1.amazoncognito.com/oauth2/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=password&client_id=your-client-id&username=your-registered-username&password=your-registered-password&scope=https://api.mcp.dog-facts.example.com/dog-facts"
+  -d "grant_type=password&client_id=your-client-id&username=your-registered-email&password=your-registered-password&scope=mcp-dog-facts/dog-facts"
 
 # Use the access token to call your MCP server
 curl -H "Authorization: Bearer your-access-token" \
@@ -261,14 +253,14 @@ curl -H "Authorization: Bearer your-access-token" \
 To remove all resources:
 
 ```bash
-npm run destroy
+npx cdk destroy
 ```
 
 ## Troubleshooting
 
 1. **Deployment fails**: Ensure your AWS credentials have sufficient permissions for CDK deployment
 2. **Domain prefix collision**: The construct now uses unique hashes to avoid Cognito domain collisions
-3. **OAuth scope issues**: Scopes now use URI format (`https://api.mcp.{server-name}.example.com/{server-name}`)
+3. **OAuth scope issues**: Scopes use the format `mcp-{server-name}/{server-name}`
 4. **Performance issues**: Lambda uses ARM64 architecture with 29s timeout for optimal performance
 
 ## Architecture

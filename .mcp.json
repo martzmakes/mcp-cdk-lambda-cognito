@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dog-facts": {
+      "type": "http",
+      "url": "https://mcp-dogfacts.martzmakes.com/mcp"
+    }
+  }
+}
