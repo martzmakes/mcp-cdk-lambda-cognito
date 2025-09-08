@@ -12,6 +12,7 @@ import {
   GatewayResponse,
   ResponseType,
   MockIntegration,
+  AwsIntegration,
 } from "aws-cdk-lib/aws-apigateway";
 import {
   UserPool,
@@ -22,10 +23,25 @@ import {
   ManagedLoginVersion,
 } from "aws-cdk-lib/aws-cognito";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
-import { HostedZone, ARecord, RecordTarget, IHostedZone } from "aws-cdk-lib/aws-route53";
+import {
+  HostedZone,
+  ARecord,
+  RecordTarget,
+  IHostedZone,
+} from "aws-cdk-lib/aws-route53";
 import { ApiGatewayDomain } from "aws-cdk-lib/aws-route53-targets";
-import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
+import {
+  Certificate,
+  CertificateValidation,
+} from "aws-cdk-lib/aws-certificatemanager";
 import { DomainName } from "aws-cdk-lib/aws-apigateway";
+import {
+  Role,
+  ServicePrincipal,
+  PolicyStatement,
+  Effect,
+  PolicyDocument,
+} from "aws-cdk-lib/aws-iam";
 import * as path from "path";
 
 export interface McpCdkLambdaCognitoProps extends cdk.StackProps {
@@ -55,7 +71,15 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
     });
 
     // Create OAuth/Cognito infrastructure
-    const { userPool, resourceServer, oauthScopes, clientId, authUrl, tokenUrl, oauthScope } = this.createAuthInfrastructure(serverName);
+    const {
+      userPool,
+      resourceServer,
+      oauthScopes,
+      clientId,
+      authUrl,
+      tokenUrl,
+      oauthScope,
+    } = this.createAuthInfrastructure(serverName);
     this.userPool = userPool;
 
     // Create MCP Lambda function
@@ -63,18 +87,17 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
 
     // Create API Gateway with OAuth
     const { apiUrl, metadataUrl } = this.createApiGateway(
-      lambdaFunction, 
-      userPool, 
-      resourceServer, 
+      lambdaFunction,
+      userPool,
+      resourceServer,
       oauthScopes,
       serverName,
       { clientId, authUrl, tokenUrl, scope: oauthScope },
       { customDomainName, certificate, hostedZone }
     );
-    
+
     this.mcpServerUrl = apiUrl;
     this.oauthMetadataUrl = metadataUrl;
-
   }
 
   private createAuthInfrastructure(serverName: string) {
@@ -100,7 +123,6 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-
     // Create User Pool Domain with hash to avoid collisions
     const domainHash = this.node.addr.substring(0, 8);
     const userPoolDomain = userPool.addDomain("McpAuthUserPoolDomain", {
@@ -115,14 +137,16 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       scopeName: serverName,
       scopeDescription: `Scope for ${serverName} MCP server`,
     });
-    
+
     const resourceServer = new UserPoolResourceServer(this, "ResourceServer", {
       identifier: `mcp-${serverName}`,
       userPool: userPool,
       scopes: [resourceServerScope],
     });
-    
-    const oauthScopes = [OAuthScope.resourceServer(resourceServer, resourceServerScope)];
+
+    const oauthScopes = [
+      OAuthScope.resourceServer(resourceServer, resourceServerScope),
+    ];
 
     // Create OAuth clients
     const interactiveClient = userPool.addClient("InteractiveClient", {
@@ -136,10 +160,15 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
           authorizationCodeGrant: true,
           implicitCodeGrant: true,
         },
-        scopes: [...oauthScopes, OAuthScope.EMAIL, OAuthScope.OPENID, OAuthScope.PROFILE],
+        scopes: [
+          ...oauthScopes,
+          OAuthScope.EMAIL,
+          OAuthScope.OPENID,
+          OAuthScope.PROFILE,
+        ],
         callbackUrls: [
           "http://localhost:9876/callback",
-          "http://localhost:6274/oauth/callback", 
+          "http://localhost:6274/oauth/callback",
           "http://localhost:8090/callback",
           `https://${userPoolDomain.domainName}/oauth2/idpresponse`,
         ],
@@ -153,8 +182,13 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
         userPassword: true,
         userSrp: true,
       },
-      supportedIdentityProviders: [cdk.aws_cognito.UserPoolClientIdentityProvider.COGNITO],
+      supportedIdentityProviders: [
+        cdk.aws_cognito.UserPoolClientIdentityProvider.COGNITO,
+      ],
     });
+
+    // Note: PKCE is automatically enabled for public clients in Cognito
+    // The client is already configured as a public client (generateSecret: false)
 
     const automatedClient = userPool.addClient("AutomatedClient", {
       generateSecret: true,
@@ -193,28 +227,26 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       redirectUri: homeUrl,
     });
 
-
     // Keep only the essential sign-in URL for user registration
     new cdk.CfnOutput(this, "SignInUrl", {
       value: signInUrl,
       description: "User registration and sign-in URL",
     });
 
-
-    return { 
-      userPool, 
-      resourceServer, 
-      oauthScopes, 
+    return {
+      userPool,
+      resourceServer,
+      oauthScopes,
       clientId: interactiveClient.userPoolClientId,
       authUrl: `https://${userPoolDomain.domainName}.auth.${this.region}.amazoncognito.com/oauth2/authorize`,
       tokenUrl: `https://${userPoolDomain.domainName}.auth.${this.region}.amazoncognito.com/oauth2/token`,
-      oauthScope: `mcp-${serverName}/${serverName}`
+      oauthScope: `mcp-${serverName}/${serverName}`,
     };
   }
 
   private createMcpLambdaFunction(serverName: string): NodejsFunction {
     const functionName = `mcp-server-${serverName}`;
-    
+
     // Create log group with AWS standard naming
     const logGroup = new LogGroup(this, "LogGroup", {
       logGroupName: `/aws/lambda/${functionName}`,
@@ -249,8 +281,17 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
     _resourceServer: UserPoolResourceServer,
     _oauthScopes: OAuthScope[],
     serverName: string,
-    oauthConfig: { clientId: string; authUrl: string; tokenUrl: string; scope: string },
-    customDomain: { customDomainName: string; certificate: Certificate; hostedZone: IHostedZone }
+    oauthConfig: {
+      clientId: string;
+      authUrl: string;
+      tokenUrl: string;
+      scope: string;
+    },
+    customDomain: {
+      customDomainName: string;
+      certificate: Certificate;
+      hostedZone: IHostedZone;
+    }
   ): { apiUrl: string; metadataUrl: string } {
     // Create Lambda integration
     const lambdaIntegration = new LambdaIntegration(lambdaFunction);
@@ -273,7 +314,7 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       defaultCorsPreflightOptions: {
         allowOrigins: Cors.ALL_ORIGINS,
         allowMethods: Cors.ALL_METHODS,
-        allowHeaders: Cors.DEFAULT_HEADERS.concat(['Authorization']),
+        allowHeaders: Cors.DEFAULT_HEADERS.concat(["Authorization"]),
       },
       deploy: true,
       deployOptions: {
@@ -285,13 +326,14 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
     });
 
     // Configure gateway responses for RFC 9728 compliance
-    
+
     new GatewayResponse(this, "UnauthorizedResponse", {
       restApi: api,
       type: ResponseType.UNAUTHORIZED,
       statusCode: "401",
       responseHeaders: {
-        "WWW-Authenticate": "'Bearer realm=\"MCP Server\", error=\"invalid_request\"'",
+        "WWW-Authenticate":
+          '\'Bearer realm="MCP Server", error="invalid_request"\'',
       },
     });
 
@@ -300,18 +342,19 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       type: ResponseType.ACCESS_DENIED,
       statusCode: "403",
       responseHeaders: {
-        "WWW-Authenticate": "'Bearer realm=\"MCP Server\", error=\"insufficient_scope\"'",
+        "WWW-Authenticate":
+          '\'Bearer realm="MCP Server", error="insufficient_scope"\'',
       },
     });
 
     // Add MCP endpoint
     const mcpResource = api.root.addResource("mcp");
-    
+
     // Allow GET requests without authentication for OAuth discovery
     mcpResource.addMethod("GET", lambdaIntegration, {
       authorizationType: AuthorizationType.NONE,
     });
-    
+
     // Require authentication for POST requests (actual MCP communication)
     mcpResource.addMethod("POST", lambdaIntegration, {
       authorizationType: AuthorizationType.COGNITO,
@@ -321,8 +364,9 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
 
     // Add OAuth protected resource metadata endpoint (RFC 9728)
     const wellKnownResource = api.root.addResource(".well-known");
-    const oauthProtectedResourceResource = wellKnownResource
-      .addResource("oauth-protected-resource");
+    const oauthProtectedResourceResource = wellKnownResource.addResource(
+      "oauth-protected-resource"
+    );
 
     const finalApiUrl = `https://${customDomain.customDomainName}/mcp`;
     const metadataIntegration = new MockIntegration({
@@ -338,7 +382,9 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
               {
                 resource_name: `${serverName} MCP Server`,
                 resource: finalApiUrl,
-                authorization_servers: [userPool.userPoolProviderUrl],
+                authorization_servers: [
+                  `https://${customDomain.customDomainName}/.well-known/oauth-authorization-server`,
+                ],
                 scopes_supported: [`mcp-${serverName}/${serverName}`],
                 bearer_methods_supported: ["header"],
               },
@@ -367,7 +413,9 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
     });
 
     // Add OAuth authorization server metadata endpoint (RFC 8414)
-    const oauthAuthServerResource = wellKnownResource.addResource("oauth-authorization-server");
+    const oauthAuthServerResource = wellKnownResource.addResource(
+      "oauth-authorization-server"
+    );
 
     const authServerMetadataIntegration = new MockIntegration({
       integrationResponses: [
@@ -380,14 +428,27 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
           responseTemplates: {
             "application/json": JSON.stringify(
               {
-                issuer: oauthConfig.authUrl.split('/oauth2/authorize')[0],
+                issuer: oauthConfig.authUrl.split("/oauth2/authorize")[0],
                 authorization_endpoint: oauthConfig.authUrl,
                 token_endpoint: oauthConfig.tokenUrl,
+                registration_endpoint: `https://${customDomain.customDomainName}/connect/register`,
                 response_types_supported: ["code"],
-                grant_types_supported: ["authorization_code", "client_credentials"],
+                grant_types_supported: [
+                  "authorization_code",
+                  "client_credentials",
+                ],
                 code_challenge_methods_supported: ["S256"],
-                scopes_supported: [`mcp-${serverName}/${serverName}`, "openid", "email", "profile"],
-                token_endpoint_auth_methods_supported: ["client_secret_post", "client_secret_basic"]
+                scopes_supported: [
+                  `mcp-${serverName}/${serverName}`,
+                  "openid",
+                  "email",
+                  "profile",
+                ],
+                token_endpoint_auth_methods_supported: [
+                  "client_secret_post",
+                  "client_secret_basic",
+                  "none",
+                ],
               },
               null,
               2
@@ -413,6 +474,111 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       ],
     });
 
+    // Add Dynamic Client Registration (DCR) endpoint
+    const connectResource = api.root.addResource("connect");
+    const registerResource = connectResource.addResource("register");
+
+    // Create IAM role for API Gateway to call Cognito
+    const cognitoIntegrationRole = new Role(this, "CognitoIntegrationRole", {
+      assumedBy: new ServicePrincipal("apigateway.amazonaws.com"),
+      inlinePolicies: {
+        CognitoAccess: new PolicyDocument({
+          statements: [
+            new PolicyStatement({
+              effect: Effect.ALLOW,
+              actions: ["cognito-idp:CreateUserPoolClient"],
+              resources: [userPool.userPoolArn],
+            }),
+          ],
+        }),
+      },
+    });
+
+    // Create AWS integration for Cognito CreateUserPoolClient API
+    const dcrIntegration = new AwsIntegration({
+      service: "cognito-idp",
+      action: "CreateUserPoolClient",
+      options: {
+        credentialsRole: cognitoIntegrationRole,
+        requestTemplates: {
+          "application/json": `#set($rawName = $util.defaultIfNull($input.path('$.client_name'), 'client'))
+#set($name1 = $rawName.trim())
+#set($name2 = $name1.replaceAll("[^A-Za-z0-9 +=,.@-]", ""))
+#if($name2.length() == 0)
+  #set($name2 = "client")
+#end
+#set($safeName = $util.escapeJavaScript($name2))
+#if($safeName.length() > 128)
+  #set($safeName = $safeName.substring(0,128))
+#end
+
+#set($cb = $input.json('$.redirect_uris'))
+#if(!$cb) #set($cb = '[]') #end
+{
+  "UserPoolId": "${userPool.userPoolId}",
+  "ClientName": "$safeName",
+  "CallbackURLs": $cb,
+  "AllowedOAuthFlows": ["code"],
+  "AllowedOAuthFlowsUserPoolClient": true,
+  "AllowedOAuthScopes": ["mcp-${serverName}/${serverName}", "openid", "email", "profile"],
+  "SupportedIdentityProviders": ["COGNITO"],
+  "GenerateSecret": false
+}`,
+        },
+        integrationResponses: [
+          {
+            statusCode: "200",
+            responseParameters: {
+              "method.response.header.Content-Type": "'application/json'",
+              "method.response.header.Access-Control-Allow-Origin": "'*'",
+            },
+            responseTemplates: {
+              "application/json": `{
+                "client_id": $input.json('$.UserPoolClient.ClientId'),
+                "client_name": $input.json('$.UserPoolClient.ClientName'),
+                "redirect_uris": $input.json('$.UserPoolClient.CallbackURLs'),
+                "response_types": ["code"],
+                "grant_types": ["authorization_code"],
+                "token_endpoint_auth_method": "none",
+                "scope": "mcp-${serverName}/${serverName} openid email profile"
+              }`,
+            },
+          },
+          {
+            statusCode: "400",
+            selectionPattern: "4\\d{2}",
+            responseTemplates: {
+              "application/json": `#set($err = $util.parseJson($input.body))
+{
+  "error": "invalid_request",
+  "error_description": "RequestId: $context.requestId | $util.escapeJavaScript($err.message)"
+}`,
+            },
+          },
+        ],
+      },
+    });
+
+    registerResource.addMethod("POST", dcrIntegration, {
+      authorizationType: AuthorizationType.NONE,
+      methodResponses: [
+        {
+          statusCode: "200",
+          responseParameters: {
+            "method.response.header.Content-Type": true,
+            "method.response.header.Access-Control-Allow-Origin": true,
+          },
+        },
+        {
+          statusCode: "400",
+          responseParameters: {
+            "method.response.header.Content-Type": true,
+            "method.response.header.Access-Control-Allow-Origin": true,
+          },
+        },
+      ],
+    });
+
     // Create custom domain
     const domainName = new DomainName(this, "CustomDomain", {
       domainName: customDomain.customDomainName,
@@ -425,7 +591,7 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
     // Create DNS record for custom domain
     new ARecord(this, "CustomDomainRecord", {
       zone: customDomain.hostedZone,
-      recordName: customDomain.customDomainName.split('.')[0], // "mcp-dogfacts"
+      recordName: customDomain.customDomainName.split(".")[0], // "mcp-dogfacts"
       target: RecordTarget.fromAlias(new ApiGatewayDomain(domainName)),
     });
 
@@ -442,12 +608,13 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "ClaudeMcpAddCommand", {
       value: `claude mcp add --transport http ${serverName} ${finalApiUrl}`,
-      description: "Claude MCP add command - run this, then use /mcp to authenticate with OAuth",
+      description:
+        "Claude MCP add command - run this, then use /mcp to authenticate with OAuth",
     });
 
-    return { 
-      apiUrl: finalApiUrl, 
-      metadataUrl: `https://${customDomain.customDomainName}/.well-known/oauth-protected-resource` 
+    return {
+      apiUrl: finalApiUrl,
+      metadataUrl: `https://${customDomain.customDomainName}/.well-known/oauth-protected-resource`,
     };
   }
 }
