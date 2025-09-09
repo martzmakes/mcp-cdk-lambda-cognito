@@ -19,7 +19,6 @@ import {
   UserPoolResourceServer,
 } from "aws-cdk-lib/aws-cognito";
 import {
-  HostedZone,
   ARecord,
   RecordTarget,
   IHostedZone,
@@ -73,8 +72,6 @@ export class McpApiGatewayConstruct extends Construct {
       serverName,
       lambdaFunction,
       userPool,
-      resourceServer,
-      oauthScopes,
       oauthConfig,
       customDomain,
     } = props;
@@ -124,7 +121,6 @@ export class McpApiGatewayConstruct extends Construct {
     this.createDcrEndpoint(api, userPool, serverName);
 
     // Setup custom domain
-    const domainName = this.createCustomDomain(api, customDomain);
 
     const finalApiUrl = `https://${customDomain.customDomainName}/mcp`;
     const metadataUrl = `https://${customDomain.customDomainName}/.well-known/oauth-protected-resource`;

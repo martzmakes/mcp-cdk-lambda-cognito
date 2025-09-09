@@ -60,29 +60,74 @@ This template includes a **Dog Facts MCP server** as a working example that prov
   - **Returns**: Formatted list of dog facts from the Dog API
 
 ### Implementation Structure
-The example server is directly implemented in `lib/lambda/mcp.ts` and demonstrates:
-- Standard MCP protocol methods (`initialize`, `tools/list`, `tools/call`)
-- External API integration (Dog API)
-- Parameter validation and error handling
-- Proper JSON-RPC response formatting
+The project now uses a **modular architecture** with clear separation of concerns:
+
+#### Core Architecture (`lib/lambda/`)
+- **`mcp.ts`**: Main entry point that instantiates and wires components
+- **`handlers/api-gateway-handler.ts`**: HTTP request/response handling with CORS and OAuth support
+- **`mcp/request-handler.ts`**: JSON-RPC request processing and routing
+- **`mcp/server-interface.ts`**: TypeScript interface defining MCP server contract
+- **`mcp/types.ts`**: Shared type definitions for MCP protocol compliance
+
+#### Dog Facts Server Implementation (`lib/lambda/servers/dog-facts/`)
+- **`server.ts`**: Complete DogFactsServer class implementing IMCPServer interface
+- **`types.ts`**: Type definitions specific to Dog API integration
+
+This architecture demonstrates:
+- **Modular Design**: Each component has a single responsibility
+- **Type Safety**: Full TypeScript coverage with proper interfaces
+- **Protocol Compliance**: Standard MCP methods (`initialize`, `tools/list`, `tools/call`)
+- **External API Integration**: Clean separation of API calls and response formatting
+- **Error Handling**: Structured JSON-RPC error responses
+- **Extensibility**: Easy to add new MCP servers alongside the dog-facts example
 
 ## Customizing for Your Use Case
 
-To create your own MCP server:
+The modular architecture makes it easy to create your own MCP servers:
 
-1. **Modify the Lambda function** (`lib/lambda/mcp.ts`):
-   - Update the `tools/list` response with your tools
-   - Implement your tool logic in the `tools/call` handler
-   - Update server metadata in the `initialize` response
+### Option 1: Create a New Server (Recommended)
 
-2. **Update the CDK stack** (`lib/mcp-cdk-lambda-cognito-stack.ts`):
-   - Change the hardcoded `serverName` from "dog-facts" to your service name
+1. **Create your server implementation** in `lib/lambda/servers/your-server/`:
+   ```typescript
+   // lib/lambda/servers/your-server/server.ts
+   import { IMCPServer } from "../../mcp/server-interface";
+   
+   export class YourServer implements IMCPServer {
+     initialize() { /* your implementation */ }
+     listTools() { /* your tools */ }
+     async callTool(params) { /* your logic */ }
+   }
+   ```
+
+2. **Add server-specific types** in `lib/lambda/servers/your-server/types.ts`
+
+3. **Update the main entry point** (`lib/lambda/mcp.ts`):
+   ```typescript
+   import { YourServer } from "./servers/your-server/server";
+   const yourServer = new YourServer();
+   export const handler = createApiGatewayHandler(yourServer);
+   ```
+
+4. **Update the CDK stack** (`lib/mcp-cdk-lambda-cognito-stack.ts`):
+   - Change `serverName` from "dog-facts" to your service name
    - Update OAuth scopes and resource identifiers
 
-3. **Customize infrastructure** as needed:
-   - Adjust Lambda memory, timeout, or runtime
-   - Modify Cognito user pool settings
-   - Add additional AWS resources
+### Option 2: Modify the Existing Dog Facts Server
+
+1. **Update the server class** (`lib/lambda/servers/dog-facts/server.ts`):
+   - Modify the `listTools()` method to return your tools
+   - Implement your business logic in the `callTool()` method
+   - Update server metadata in the `initialize()` method
+
+2. **Add your types** to `lib/lambda/servers/dog-facts/types.ts`
+
+### Benefits of the Modular Architecture
+
+- **Clean Separation**: Protocol handling is separate from business logic
+- **Reusability**: The `createApiGatewayHandler` can be used with any IMCPServer
+- **Type Safety**: Full TypeScript support with proper interfaces
+- **Testing**: Each component can be unit tested independently
+- **Multiple Servers**: Easy to deploy different servers by changing the import in `mcp.ts`
 
 ### Authentication
 

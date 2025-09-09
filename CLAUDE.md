@@ -10,6 +10,7 @@ npm install          # Install dependencies
 npm run build        # Compile TypeScript to JavaScript
 npm run watch        # Watch mode for development
 npm test             # Run Jest tests
+npx tsc --noEmit     # Type check without emitting files (preferred for CI/validation)
 npx cdk deploy       # Deploy the stack to AWS
 npx cdk destroy      # Remove all AWS resources
 npx cdk diff         # Show differences before deployment
@@ -27,35 +28,39 @@ npx cdk doctor       # Check for common CDK issues
 
 This is a **standalone CDK construct** that deploys Model Context Protocol (MCP) servers on AWS Lambda with OAuth 2 authorization via Amazon Cognito. The project has been simplified from its original generic form to focus specifically on a **hardcoded dog-facts server**.
 
-### Key Architectural Changes Made
-The codebase has undergone significant simplification:
-- **Hardcoded Server**: The `serverName` is now hardcoded as "dog-facts" instead of being configurable
-- **Direct Implementation**: The Lambda function (`lib/lambda/mcp.ts`) directly implements dog facts logic instead of spawning separate MCP server processes
-- **Simplified Bundling**: Removed complex `afterBundling` steps and external file copying
-- **Streamlined Props**: The CDK stack props interface is minimal, removing `nodeModules` and `serverCommand/serverArgs` parameters
+### Modular Construct Architecture
+The codebase uses a **three-construct pattern** for clear separation of concerns:
 
-### Core Components
+#### 1. McpAuthConstruct (`lib/constructs/mcp-auth-construct.ts`) - "The Gatekeeper"
+- **Purpose**: Handles all OAuth 2.0 and Cognito authentication infrastructure
+- **Inputs**: Only `serverName` required
+- **Outputs**: Clean `result` object with auth components (userPool, resourceServer, oauthScopes, etc.)
+- **Creates**: Cognito User Pool, OAuth clients (interactive + automated), resource servers, and branding
 
-#### 1. CDK Stack (`lib/mcp-cdk-lambda-cognito-stack.ts`)
-- **Main Stack Class**: `McpCdkLambdaCognitoStack` 
-- **Hardcoded Configuration**: `serverName = "dog-facts"` set in constructor
-- **Three Main Methods**:
-  - `createAuthInfrastructure()`: Sets up Cognito User Pool, OAuth clients, and resource servers
-  - `createMcpLambdaFunction()`: Creates the Lambda function with simplified bundling
-  - `createApiGateway()`: Sets up API Gateway with Cognito authorization and RFC 9728 compliance
+#### 2. McpLambdaConstruct (`lib/constructs/mcp-lambda-construct.ts`) - "The Worker"
+- **Purpose**: Creates the Lambda function that processes MCP requests
+- **Inputs**: `serverName` + optional config (memory, timeout, logLevel)
+- **Outputs**: Configured `lambdaFunction` ready for API Gateway integration
+- **Features**: ARM64 runtime, ESM bundling, CloudWatch logs with 1-day retention
 
-#### 2. Lambda Function (`lib/lambda/mcp.ts`)
-- **Direct MCP Implementation**: No longer spawns external processes
-- **Simplified Architecture**: ~258 lines vs original ~537 lines
-- **Core Functions**:
-  - `handleMcpRequest()`: Processes JSON-RPC requests for initialize, tools/list, and tools/call methods
-  - Main `handler()`: Direct API Gateway event processing with CORS, validation, and error handling
-- **Dog Facts Integration**: Directly calls `https://dogapi.dog/api/v2/facts` API
+#### 3. McpApiGatewayConstruct (`lib/constructs/mcp-api-gateway-construct.ts`) - "The Gateway"
+- **Purpose**: Creates API Gateway with OAuth endpoints, custom domain, and RFC compliance
+- **Inputs**: Lambda function, auth components, domain configuration
+- **Outputs**: Final API URL and OAuth metadata URL
+- **Features**: CORS support, OAuth discovery endpoints, Dynamic Client Registration (DCR)
 
-#### 3. Entry Point (`bin/mcp-cdk-lambda-cognito.ts`)
-- Deploys single stack with hardcoded configuration
-- Stack name: "StandaloneMcp-DogFacts"
-- Target region: us-east-1
+#### 4. Main Stack (`lib/mcp-cdk-lambda-cognito-stack.ts`) - "The Orchestrator"
+- **Purpose**: Composes all constructs with minimal configuration (~78 lines)
+- **Pattern**: Auth → Lambda → API Gateway data flow
+- **Configuration**: Hardcoded `serverName = "dog-facts"` and custom domain `mcp-dogfacts.martzmakes.com`
+
+#### 5. Lambda Function (`lib/lambda/mcp.ts`)
+- **Direct MCP Implementation**: No external process spawning
+- **Core Methods**: `initialize`, `tools/list`, `tools/call` for getDogFacts tool
+- **Integration**: Direct API calls to `https://dogapi.dog/api/v2/facts`
+
+#### 6. Entry Point (`bin/mcp-cdk-lambda-cognito.ts`)
+- Single stack deployment: "StandaloneMcp-DogFacts" in us-east-1
 
 ### OAuth 2 Infrastructure
 The construct creates complete OAuth 2 infrastructure:
@@ -88,7 +93,16 @@ The Lambda function implements standard MCP JSON-RPC methods:
 - **Error Handling**: Structured JSON-RPC error responses
 
 ### Development Notes
-- The `dog-facts-server.ts` file has been removed as its logic is now integrated directly into `mcp.ts`
-- The bundling no longer requires `afterBundling` steps or copying external files
-- OAuth configuration uses unique domain hash prefixes to avoid Cognito domain collisions
-- All AWS resources use removal policy DESTROY for development convenience
+- **No index.ts files**: Direct imports are used instead of barrel exports (e.g., `./constructs/mcp-auth-construct`)
+- **TypeScript validation**: Use `npx tsc --noEmit` instead of `npm run build` for type checking
+- **Construct pattern**: Each construct exposes a clean interface with minimal required inputs
+- **OAuth configuration**: Uses unique domain hash prefixes to avoid Cognito domain collisions  
+- **Development mode**: All AWS resources use removal policy DESTROY for easy cleanup
+- **Custom domain**: Requires pre-existing Route 53 hosted zone for `martzmakes.com`
+
+### Key Implementation Details
+- **Lambda bundling**: ESM format with esbuild, no complex afterBundling steps
+- **MCP Protocol**: Standard JSON-RPC implementation with initialize, tools/list, tools/call
+- **RFC 9728 compliance**: OAuth protected resource metadata endpoints
+- **CORS handling**: Proper preflight support for browser-based clients
+- **Error responses**: Structured JSON-RPC error format with appropriate HTTP status codes
