@@ -129,7 +129,8 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       cognitoDomain: {
         domainPrefix: `mcp-${serverName}-${domainHash}`,
       },
-      managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
+      // IMPORTANT: have to use CLASSIC_HOSTED_UI... NEWER_MANAGED_LOGIN does NOT work with DCR
+      managedLoginVersion: ManagedLoginVersion.CLASSIC_HOSTED_UI,
     });
 
     // Create resource server and scopes
@@ -501,12 +502,12 @@ export class McpCdkLambdaCognitoStack extends cdk.Stack {
       options: {
         credentialsRole: cognitoIntegrationRole,
         requestTemplates: {
-          "application/json": `#set($rawName = $util.defaultIfNull($input.path('$.client_name'), 'client'))
-#set($name1 = $rawName.trim())
-#set($name2 = $name1.replaceAll("[^A-Za-z0-9 +=,.@-]", ""))
-#if($name2.length() == 0)
-  #set($name2 = "client")
+          "application/json": `#set($rawName = $input.path('$.client_name'))
+#if(!$rawName || $rawName == "")
+  #set($rawName = "client")
 #end
+#set($name1 = $rawName.trim())
+#set($name2 = $name1.replaceAll("[^\\w\\s+=,.@-]", ""))
 #set($safeName = $util.escapeJavaScript($name2))
 #if($safeName.length() > 128)
   #set($safeName = $safeName.substring(0,128))
